@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Search, IndianRupee, Download, ChevronRight, Trash2, CreditCard } from 'lucide-react';
+import { Plus, Search, IndianRupee, Download, ChevronRight, Trash2, CreditCard, Printer, Eye } from 'lucide-react';
 import { Invoice, InvoiceFilters, InvoiceItem, InvoiceStatus, PaymentMethod, UUID, computeTotals } from '../types/billing';
 import { createInvoice, deleteInvoice, listInvoices, recordPayment } from '../services/billingApi';
+import { exportElementToPDF } from '../utils/pdf';
+import { printElement } from '../utils/print';
 
 // Small reusable UI primitives
 function Badge({ status }: { status: InvoiceStatus }) {
@@ -49,6 +51,7 @@ export default function BillingPage() {
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showPayFor, setShowPayFor] = useState<Invoice | null>(null);
+  const [previewFor, setPreviewFor] = useState<Invoice | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -83,9 +86,14 @@ export default function BillingPage() {
           <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
             <Plus className="w-4 h-4" /> New Invoice
           </button>
-          <button className="inline-flex items-center gap-2 bg-white border px-3 py-2 rounded-lg text-gray-700 hover:bg-gray-50">
-            <Download className="w-4 h-4" /> Export
-          </button>
+          {previewFor && (
+            <button onClick={() => {
+              const el = document.getElementById('invoice-print-area');
+              if (el) exportElementToPDF(el, `${previewFor.invoice_number}.pdf`);
+            }} className="inline-flex items-center gap-2 bg-white border px-3 py-2 rounded-lg text-gray-700 hover:bg-gray-50">
+              <Download className="w-4 h-4" /> Export PDF
+            </button>
+          )}
         </div>
       </div>
 
@@ -156,6 +164,7 @@ export default function BillingPage() {
                     <td className="px-6 py-3"><Badge status={inv.status} /></td>
                     <td className="px-6 py-3">
                       <div className="flex items-center gap-2">
+                        <button onClick={() => setPreviewFor(inv)} className="px-3 py-1.5 text-xs rounded-lg bg-white border text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1"><Eye className="w-3.5 h-3.5"/> View</button>
                         <button onClick={() => setShowPayFor(inv)} className="px-3 py-1.5 text-xs rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Record Payment</button>
                         <button onClick={() => handleDelete(inv.id)} className="p-2 text-gray-500 hover:text-red-600" title="Delete"><Trash2 className="w-4 h-4" /></button>
                       </div>
@@ -170,6 +179,7 @@ export default function BillingPage() {
 
       {showCreate && <CreateInvoiceModal onClose={() => setShowCreate(false)} onCreated={(i) => { setShowCreate(false); setInvoices(v => [i, ...v]); }} />}
       {showPayFor && <RecordPaymentModal invoice={showPayFor} onClose={() => setShowPayFor(null)} onSaved={(i) => { setShowPayFor(null); setInvoices(v => v.map(x => x.id === i.id ? i : x)) }} />}
+      {previewFor && <InvoicePreviewModal invoice={previewFor} onClose={() => setPreviewFor(null)} />}
     </div>
   );
 
@@ -296,6 +306,75 @@ function RecordPaymentModal({ invoice, onClose, onSaved }: { invoice: Invoice; o
         <div className="flex items-center justify-end gap-3 pt-2">
           <button onClick={onClose} className="px-4 py-2 rounded-lg border">Cancel</button>
           <button onClick={async () => { const updated = await recordPayment(invoice.id, { amount, payment_date: date, payment_method: method }); onSaved(updated); }} className="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Save Payment</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function InvoicePreviewModal({ invoice, onClose }: { invoice: Invoice; onClose: () => void }) {
+  const { total, paid, balance } = computeTotals(invoice);
+  return (
+    <Modal title={`Invoice Preview • ${invoice.invoice_number}`} onClose={onClose}>
+      <div className="flex justify-end gap-2 mb-3">
+        <button onClick={() => { const el = document.getElementById('invoice-print-area'); if (el) printElement(el, invoice.invoice_number) }} className="inline-flex items-center gap-2 bg-white border px-3 py-2 rounded-lg text-gray-700 hover:bg-gray-50"><Printer className="w-4 h-4" /> Print</button>
+        <button onClick={() => { const el = document.getElementById('invoice-print-area'); if (el) exportElementToPDF(el, `${invoice.invoice_number}.pdf`); }} className="inline-flex items-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700"><Download className="w-4 h-4" /> PDF</button>
+      </div>
+      <div id="invoice-print-area" className="bg-white rounded-xl border p-6 text-sm">
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="text-2xl font-bold text-gray-900">TransportMS</div>
+            <div className="text-gray-500">Transportation Management System</div>
+          </div>
+          <div className="text-right">
+            <div className="text-xl font-semibold">Invoice</div>
+            <div className="text-gray-500">{invoice.invoice_number}</div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4 mt-6">
+          <div>
+            <div className="text-gray-600">Booking ID</div>
+            <div className="font-medium">{invoice.booking_id}</div>
+          </div>
+          <div className="text-right">
+            <div className="text-gray-600">Due Date</div>
+            <div className="font-medium">{invoice.due_date}</div>
+          </div>
+        </div>
+        <div className="mt-6">
+          <table className="w-full">
+            <thead>
+              <tr className="text-left text-gray-600">
+                <th className="py-2">Description</th>
+                <th className="py-2 text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(invoice.items ?? []).map(it => (
+                <tr key={it.id} className="border-t">
+                  <td className="py-2 pr-4">{it.description}</td>
+                  <td className="py-2 text-right">{currency(Number(it.amount))}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t">
+                <td className="py-2 text-right font-medium">Total</td>
+                <td className="py-2 text-right font-semibold">{currency(total)}</td>
+              </tr>
+              <tr>
+                <td className="py-2 text-right font-medium">Paid</td>
+                <td className="py-2 text-right">{currency(paid)}</td>
+              </tr>
+              <tr>
+                <td className="py-2 text-right font-medium">Balance</td>
+                <td className="py-2 text-right">{currency(balance)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div className="mt-8 text-gray-500 text-xs">
+          Thank you for your business. Please make the payment by the due date. For any queries, contact accounts@transportms.example.
         </div>
       </div>
     </Modal>
