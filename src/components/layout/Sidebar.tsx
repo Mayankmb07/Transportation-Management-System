@@ -2,7 +2,6 @@ import React from 'react';
 import {
   Users,
   UserCheck,
-  Building2,
   Truck,
   BookOpen,
   Route,
@@ -15,7 +14,7 @@ import {
   Settings,
   LogOut,
 } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
+// import { useAuth } from '../../contexts/AuthContext';
 
 interface SidebarProps {
   activeTab: string;
