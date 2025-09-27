@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Search, IndianRupee, Download, ChevronRight, Trash2, CreditCard, Printer, Eye } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Invoice, InvoiceFilters, InvoiceItem, InvoiceStatus, PaymentMethod, UUID, computeTotals } from '../types/billing';
 import { createInvoice, deleteInvoice, listInvoices, recordPayment } from '../services/billingApi';
 import { exportElementToPDF } from '../utils/pdf';
@@ -155,7 +156,9 @@ export default function BillingPage() {
                 const { total, paid, balance } = computeTotals(inv);
                 return (
                   <tr key={inv.id} className="border-t text-sm">
-                    <td className="px-6 py-3 font-medium">{inv.invoice_number}</td>
+                    <td className="px-6 py-3 font-medium">
+                      <Link to={`/billing/${inv.id}`} className="text-blue-600 hover:underline">{inv.invoice_number}</Link>
+                    </td>
                     <td className="px-6 py-3 text-gray-600">{inv.booking_id}</td>
                     <td className="px-6 py-3">{inv.due_date}</td>
                     <td className="px-6 py-3">{currency(total)}</td>
@@ -165,6 +168,7 @@ export default function BillingPage() {
                     <td className="px-6 py-3">
                       <div className="flex items-center gap-2">
                         <button onClick={() => setPreviewFor(inv)} className="px-3 py-1.5 text-xs rounded-lg bg-white border text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1"><Eye className="w-3.5 h-3.5"/> View</button>
+                        <button onClick={() => { const el = document.getElementById('invoice-print-area'); if (el) exportElementToPDF(el, `${inv.invoice_number}.pdf`); else setPreviewFor(inv); }} className="px-3 py-1.5 text-xs rounded-lg bg-white border text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1"><Download className="w-3.5 h-3.5"/> PDF</button>
                         <button onClick={() => setShowPayFor(inv)} className="px-3 py-1.5 text-xs rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Record Payment</button>
                         <button onClick={() => handleDelete(inv.id)} className="p-2 text-gray-500 hover:text-red-600" title="Delete"><Trash2 className="w-4 h-4" /></button>
                       </div>
