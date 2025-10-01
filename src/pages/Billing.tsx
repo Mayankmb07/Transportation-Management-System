@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Search, IndianRupee, Download, ChevronRight, Trash2, CreditCard, Printer, Eye } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Plus, Search, IndianRupee, Download, ChevronRight, Trash2, CreditCard } from 'lucide-react';
 import { Invoice, InvoiceFilters, InvoiceItem, InvoiceStatus, PaymentMethod, UUID, computeTotals } from '../types/billing';
 import { createInvoice, deleteInvoice, listInvoices, recordPayment } from '../services/billingApi';
-import { exportElementToPDF } from '../utils/pdf';
-import { printElement } from '../utils/print';
+import InvoicePrintView from '../components/invoice/InvoicePrintView';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 // Small reusable UI primitives
 function Badge({ status }: { status: InvoiceStatus }) {
@@ -46,13 +46,26 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
 
 const currency = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(n || 0);
 
+type InvoiceForPreview = {
+  id: string;
+  booking_id: string;
+  invoice_number: string;
+  total_amount: number;
+  due_date: string | Date;
+  status: 'Unpaid' | 'Paid' | 'Overdue';
+  items?: { id: string; invoice_id: string; description: string; amount: number }[];
+  payments?: { id: string; invoice_id: string; amount: number; payment_date: string | Date; payment_method: string }[];
+};
+
 export default function BillingPage() {
   const [filters, setFilters] = useState<InvoiceFilters>({ status: 'All' });
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showPayFor, setShowPayFor] = useState<Invoice | null>(null);
-  const [previewFor, setPreviewFor] = useState<Invoice | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewInvoice, setPreviewInvoice] = useState<InvoiceForPreview | null>(null);
+  const printRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -75,6 +88,52 @@ export default function BillingPage() {
     return { total, paid, balance };
   }, [invoices]);
 
+  const openPreview = (inv: any) => {
+    setPreviewInvoice({
+      ...inv,
+      items: inv.items || [],
+      payments: inv.payments || [],
+    });
+    setPreviewOpen(true);
+  };
+
+  const handlePrint = () => {
+    // Renders a hidden print-only node; this just triggers the print
+    window.print();
+  };
+
+  const handleExportPdf = async () => {
+    if (!printRef.current) return;
+    const node = printRef.current;
+
+    // Make sure the preview is open so node is in the DOM
+    // Capture at high scale for sharp PDF
+    const canvas = await html2canvas(node, { scale: 2, backgroundColor: '#ffffff' });
+    const imgData = canvas.toDataURL('image/png');
+
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const imgWidth = pageWidth;
+    const imgHeight = canvas.height * (imgWidth / canvas.width);
+
+    let position = 0;
+    let heightLeft = imgHeight;
+
+    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
+    heightLeft -= pageHeight;
+
+    while (heightLeft > 0) {
+      position = heightLeft - imgHeight;
+      pdf.addPage();
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
+      heightLeft -= pageHeight;
+    }
+
+    const fileName = `Invoice_${previewInvoice?.invoice_number || 'TSM'}.pdf`;
+    pdf.save(fileName);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header actions */}
@@ -87,14 +146,9 @@ export default function BillingPage() {
           <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
             <Plus className="w-4 h-4" /> New Invoice
           </button>
-          {previewFor && (
-            <button onClick={() => {
-              const el = document.getElementById('invoice-print-area');
-              if (el) exportElementToPDF(el, `${previewFor.invoice_number}.pdf`);
-            }} className="inline-flex items-center gap-2 bg-white border px-3 py-2 rounded-lg text-gray-700 hover:bg-gray-50">
-              <Download className="w-4 h-4" /> Export PDF
-            </button>
-          )}
+          <button className="inline-flex items-center gap-2 bg-white border px-3 py-2 rounded-lg text-gray-700 hover:bg-gray-50">
+            <Download className="w-4 h-4" /> Export
+          </button>
         </div>
       </div>
 
@@ -156,9 +210,7 @@ export default function BillingPage() {
                 const { total, paid, balance } = computeTotals(inv);
                 return (
                   <tr key={inv.id} className="border-t text-sm">
-                    <td className="px-6 py-3 font-medium">
-                      <Link to={`/billing/${inv.id}`} className="text-blue-600 hover:underline">{inv.invoice_number}</Link>
-                    </td>
+                    <td className="px-6 py-3 font-medium">{inv.invoice_number}</td>
                     <td className="px-6 py-3 text-gray-600">{inv.booking_id}</td>
                     <td className="px-6 py-3">{inv.due_date}</td>
                     <td className="px-6 py-3">{currency(total)}</td>
@@ -167,10 +219,34 @@ export default function BillingPage() {
                     <td className="px-6 py-3"><Badge status={inv.status} /></td>
                     <td className="px-6 py-3">
                       <div className="flex items-center gap-2">
-                        <button onClick={() => setPreviewFor(inv)} className="px-3 py-1.5 text-xs rounded-lg bg-white border text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1"><Eye className="w-3.5 h-3.5"/> View</button>
-                        <button onClick={() => { const el = document.getElementById('invoice-print-area'); if (el) exportElementToPDF(el, `${inv.invoice_number}.pdf`); else setPreviewFor(inv); }} className="px-3 py-1.5 text-xs rounded-lg bg-white border text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1"><Download className="w-3.5 h-3.5"/> PDF</button>
                         <button onClick={() => setShowPayFor(inv)} className="px-3 py-1.5 text-xs rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Record Payment</button>
                         <button onClick={() => handleDelete(inv.id)} className="p-2 text-gray-500 hover:text-red-600" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                        <button
+                          onClick={() => openPreview(inv)}
+                          className="inline-flex items-center rounded-md border px-2.5 py-1.5 text-sm hover:bg-gray-50"
+                        >
+                          View
+                        </button>
+                        <button
+                          onClick={() => {
+                            openPreview(inv);
+                            // give modal a tick to render then print
+                            setTimeout(() => handlePrint(), 50);
+                          }}
+                          className="inline-flex items-center rounded-md border px-2.5 py-1.5 text-sm hover:bg-gray-50"
+                        >
+                          Print
+                        </button>
+                        <button
+                          onClick={() => {
+                            openPreview(inv);
+                            // give modal a tick to render then export
+                            setTimeout(() => handleExportPdf(), 150);
+                          }}
+                          className="inline-flex items-center rounded-md bg-indigo-600 text-white px-2.5 py-1.5 text-sm hover:bg-indigo-700"
+                        >
+                          Export PDF
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -183,7 +259,65 @@ export default function BillingPage() {
 
       {showCreate && <CreateInvoiceModal onClose={() => setShowCreate(false)} onCreated={(i) => { setShowCreate(false); setInvoices(v => [i, ...v]); }} />}
       {showPayFor && <RecordPaymentModal invoice={showPayFor} onClose={() => setShowPayFor(null)} onSaved={(i) => { setShowPayFor(null); setInvoices(v => v.map(x => x.id === i.id ? i : x)) }} />}
-      {previewFor && <InvoicePreviewModal invoice={previewFor} onClose={() => setPreviewFor(null)} />}
+
+      {/* Hidden print-only node outside the modal (visible only in print) */}
+      <div className="hidden print:block print-a4">
+        {previewInvoice && (
+          <div>
+            <InvoicePrintView
+              invoice={previewInvoice}
+              items={previewInvoice.items}
+              payments={previewInvoice.payments}
+              company={{ name: 'Transportation Management System' }}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Preview Modal */}
+      {previewOpen && previewInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 no-print">
+          <div className="relative w-[min(900px,95vw)] max-h-[90vh] overflow-auto bg-white rounded-2xl shadow-xl">
+            {/* Modal header */}
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-white/80 backdrop-blur px-4 py-3">
+              <div>
+                <div className="text-sm text-gray-500">Invoice</div>
+                <div className="font-semibold">{previewInvoice.invoice_number}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handlePrint}
+                  className="inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
+                >
+                  Print
+                </button>
+                <button
+                  onClick={handleExportPdf}
+                  className="inline-flex items-center rounded-md bg-indigo-600 text-white px-3 py-1.5 text-sm hover:bg-indigo-700"
+                >
+                  Export PDF
+                </button>
+                <button
+                  onClick={() => setPreviewOpen(false)}
+                  className="inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            {/* Modal content to capture for PDF */}
+            <div ref={printRef} className="p-6">
+              <InvoicePrintView
+                invoice={previewInvoice}
+                items={previewInvoice.items}
+                payments={previewInvoice.payments}
+                company={{ name: 'Transportation Management System' }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -310,75 +444,6 @@ function RecordPaymentModal({ invoice, onClose, onSaved }: { invoice: Invoice; o
         <div className="flex items-center justify-end gap-3 pt-2">
           <button onClick={onClose} className="px-4 py-2 rounded-lg border">Cancel</button>
           <button onClick={async () => { const updated = await recordPayment(invoice.id, { amount, payment_date: date, payment_method: method }); onSaved(updated); }} className="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Save Payment</button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-function InvoicePreviewModal({ invoice, onClose }: { invoice: Invoice; onClose: () => void }) {
-  const { total, paid, balance } = computeTotals(invoice);
-  return (
-    <Modal title={`Invoice Preview • ${invoice.invoice_number}`} onClose={onClose}>
-      <div className="flex justify-end gap-2 mb-3">
-        <button onClick={() => { const el = document.getElementById('invoice-print-area'); if (el) printElement(el, invoice.invoice_number) }} className="inline-flex items-center gap-2 bg-white border px-3 py-2 rounded-lg text-gray-700 hover:bg-gray-50"><Printer className="w-4 h-4" /> Print</button>
-        <button onClick={() => { const el = document.getElementById('invoice-print-area'); if (el) exportElementToPDF(el, `${invoice.invoice_number}.pdf`); }} className="inline-flex items-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700"><Download className="w-4 h-4" /> PDF</button>
-      </div>
-      <div id="invoice-print-area" className="bg-white rounded-xl border p-6 text-sm">
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="text-2xl font-bold text-gray-900">TransportMS</div>
-            <div className="text-gray-500">Transportation Management System</div>
-          </div>
-          <div className="text-right">
-            <div className="text-xl font-semibold">Invoice</div>
-            <div className="text-gray-500">{invoice.invoice_number}</div>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-4 mt-6">
-          <div>
-            <div className="text-gray-600">Booking ID</div>
-            <div className="font-medium">{invoice.booking_id}</div>
-          </div>
-          <div className="text-right">
-            <div className="text-gray-600">Due Date</div>
-            <div className="font-medium">{invoice.due_date}</div>
-          </div>
-        </div>
-        <div className="mt-6">
-          <table className="w-full">
-            <thead>
-              <tr className="text-left text-gray-600">
-                <th className="py-2">Description</th>
-                <th className="py-2 text-right">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(invoice.items ?? []).map(it => (
-                <tr key={it.id} className="border-t">
-                  <td className="py-2 pr-4">{it.description}</td>
-                  <td className="py-2 text-right">{currency(Number(it.amount))}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="border-t">
-                <td className="py-2 text-right font-medium">Total</td>
-                <td className="py-2 text-right font-semibold">{currency(total)}</td>
-              </tr>
-              <tr>
-                <td className="py-2 text-right font-medium">Paid</td>
-                <td className="py-2 text-right">{currency(paid)}</td>
-              </tr>
-              <tr>
-                <td className="py-2 text-right font-medium">Balance</td>
-                <td className="py-2 text-right">{currency(balance)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-        <div className="mt-8 text-gray-500 text-xs">
-          Thank you for your business. Please make the payment by the due date. For any queries, contact accounts@transportms.example.
         </div>
       </div>
     </Modal>

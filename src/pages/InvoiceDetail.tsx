@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Download, Printer, ArrowLeft } from 'lucide-react';
 import { Invoice, UUID, computeTotals } from '../types/billing';
@@ -33,7 +33,7 @@ export default function InvoiceDetail() {
 
   if (!invoice) {
     return (
-      <div className="bg-white rounded-xl p-6 border shadow-sm">
+      <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-sm text-gray-300">
         Loading invoice...
       </div>
     );
@@ -42,11 +42,11 @@ export default function InvoiceDetail() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <button onClick={() => navigate('/billing')} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-gray-700 hover:bg-gray-50">
+        <button onClick={() => navigate('/billing')} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-700 text-gray-200 hover:bg-gray-800">
           <ArrowLeft className="w-4 h-4" /> Back to Billing
         </button>
         <div className="flex items-center gap-2">
-          <button onClick={() => { if (printRef.current) printElement(printRef.current, invoice.invoice_number) }} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-gray-700 hover:bg-gray-50"><Printer className="w-4 h-4"/> Print</button>
+          <button onClick={() => { if (printRef.current) printElement(printRef.current, invoice.invoice_number) }} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-700 text-gray-200 hover:bg-gray-800"><Printer className="w-4 h-4"/> Print</button>
           <button onClick={() => { if (printRef.current) exportElementToPDF(printRef.current, `${invoice.invoice_number}.pdf`) }} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"><Download className="w-4 h-4"/> PDF</button>
         </div>
       </div>
